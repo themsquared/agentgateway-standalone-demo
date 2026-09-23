@@ -1,0 +1,230 @@
+{
+  "realm": "demo",
+  "enabled": true,
+  "displayName": "Demo realm (stands in for your OIDC provider)",
+  "sslRequired": "none",
+  "registrationAllowed": false,
+  "loginWithEmailAllowed": true,
+  "accessTokenLifespan": 3600,
+  "groups": [
+    {
+      "name": "ai-users"
+    },
+    {
+      "name": "ai-admins"
+    },
+    {
+      "name": "platform-engineering"
+    }
+  ],
+  "roles": {
+    "realm": [
+      {
+        "name": "ai-user",
+        "description": "May call the gateway"
+      },
+      {
+        "name": "ai-admin",
+        "description": "May read cost data and change policy"
+      }
+    ]
+  },
+  "users": [
+    {
+      "username": "dev-user",
+      "enabled": true,
+      "emailVerified": true,
+      "email": "dev-user@example.com",
+      "firstName": "Dev",
+      "lastName": "User",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "demo",
+          "temporary": false
+        }
+      ],
+      "realmRoles": [
+        "ai-user"
+      ],
+      "groups": [
+        "/ai-users"
+      ]
+    },
+    {
+      "username": "admin-user",
+      "enabled": true,
+      "emailVerified": true,
+      "email": "admin-user@example.com",
+      "firstName": "Admin",
+      "lastName": "User",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "demo",
+          "temporary": false
+        }
+      ],
+      "realmRoles": [
+        "ai-user",
+        "ai-admin"
+      ],
+      "groups": [
+        "/ai-admins"
+      ]
+    },
+    {
+      "username": "gov-user",
+      "enabled": true,
+      "emailVerified": true,
+      "email": "gov-user@example.com",
+      "firstName": "Gov",
+      "lastName": "User",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "demo",
+          "temporary": false
+        }
+      ],
+      "realmRoles": [
+        "ai-user",
+        "ai-admin"
+      ],
+      "groups": [
+        "/ai-admins"
+      ]
+    },
+    {
+      "username": "no-group-user",
+      "enabled": true,
+      "emailVerified": true,
+      "email": "no-group-user@example.com",
+      "firstName": "No",
+      "lastName": "Group",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "demo",
+          "temporary": false
+        }
+      ],
+      "realmRoles": [],
+      "groups": []
+    },
+    {
+      "username": "service-user",
+      "enabled": true,
+      "emailVerified": true,
+      "email": "service-user@example.com",
+      "firstName": "Service",
+      "lastName": "User",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "demo",
+          "temporary": false
+        }
+      ],
+      "realmRoles": [
+        "ai-user"
+      ],
+      "groups": [
+        "/ai-users"
+      ],
+      "attributes": {
+        "agent": [
+          "true"
+        ]
+      }
+    }
+  ],
+  "clients": [
+    {
+      "clientId": "demo-ui",
+      "name": "agentgateway admin UI",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "secret": "demo-ui-secret",
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": true,
+      "redirectUris": [
+        "http://localhost:14001/*",
+        "http://keycloak:14001/*"
+      ],
+      "webOrigins": [
+        "*"
+      ],
+      "defaultClientScopes": [
+        "basic",
+        "openid",
+        "profile",
+        "email",
+        "roles"
+      ],
+      "protocolMappers": [
+        {
+          "name": "groups",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-group-membership-mapper",
+          "config": {
+            "full.path": "false",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "claim.name": "groups",
+            "userinfo.token.claim": "true"
+          }
+        }
+      ]
+    },
+    {
+      "clientId": "demo-cli",
+      "name": "Password-grant client for the demo script",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": true,
+      "standardFlowEnabled": false,
+      "directAccessGrantsEnabled": true,
+      "defaultClientScopes": [
+        "basic",
+        "openid",
+        "profile",
+        "email",
+        "roles"
+      ],
+      "protocolMappers": [
+        {
+          "name": "groups",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-group-membership-mapper",
+          "config": {
+            "full.path": "false",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "claim.name": "groups",
+            "userinfo.token.claim": "true"
+          }
+        }
+      ]
+    },
+    {
+      "clientId": "demo-agent",
+      "name": "The agent's own identity, for delegation",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "secret": "demo-agent-secret",
+      "standardFlowEnabled": false,
+      "directAccessGrantsEnabled": true,
+      "serviceAccountsEnabled": true,
+      "defaultClientScopes": [
+        "basic",
+        "openid",
+        "profile",
+        "email",
+        "roles"
+      ]
+    }
+  ]
+}

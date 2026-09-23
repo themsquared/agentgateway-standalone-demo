@@ -1,0 +1,7 @@
+.env
+config/license.key
+config/config.yaml
+config/sts-jwt.pem
+config/base-costs.json
+data/
+*.db

@@ -1,0 +1,301 @@
+# yaml-language-server: $schema=https://agentgateway.dev/schema/config
+#
+# ACT 3 — GOVERNANCE, IDENTITY, AUDIT
+#
+# Everything from Acts 1 and 2 carries forward. This act adds:
+#   1. Tool authorization, so the federated MCP door is governed rather than
+#      merely single. Unauthorized tools are filtered out of tools/list
+#      entirely, so the client never learns they exist.
+#   2. The admin UI behind OIDC, because the admin address has no
+#      authentication and the cost dashboard lives on it.
+#   3. A security token service, so an agent calling on a user's behalf
+#      presents a token naming both parties.
+
+config:
+  adminAddr: 0.0.0.0:15000
+  license:
+    key:
+      file: /config/license.key
+  database:
+    url: "sqlite:///data/demo.db?mode=rwc"
+  modelCatalog:
+  - file: /config/base-costs.json
+
+  # How spend rolls up. `user` is a CEL expression evaluated per request and
+  # written to a log attribute the cost dashboard groups by. Reading it from a
+  # virtual key's metadata means one key per project gives a per-project
+  # roll-up. Point it at a JWT claim instead and the same dashboard works for
+  # humans authenticated through your IdP, with no application change.
+  standardAttributes:
+    user: apiKey.name
+
+llm:
+  port: 4000
+
+  policies:
+    # -------------------------------------------------------------------------
+    # Guardrails, applied to every configured model.
+    #
+    # `scope` is the field that matters and the one that is easy to get wrong.
+    # A request guard reads the system prompt and message text BY DEFAULT — tool
+    # results coming back to the model are not read at all. And scope REPLACES
+    # the default rather than adding to it, so naming only toolOutput would stop
+    # catching sensitive data pasted into a prompt. Name all three.
+    #
+    # Built-in patterns are ssn, creditCard, phoneNumber, email and caSin. For
+    # your own identifier formats, write a pattern.
+    guardrails:
+      request:
+      - scope: [systemPrompt, messages, toolOutput]
+        regex:
+          action: reject
+          rules:
+          - builtin: email
+          - builtin: phoneNumber
+          - builtin: creditCard
+          # An example internal account identifier, e.g. ACCT-482913
+          - pattern: '\bACCT-[0-9]{6}\b'
+        rejection:
+          status: 400
+          body: |
+            {"error":{"code":"data_policy","message":"Blocked at the AI gateway: this request carried customer-identifying data. Source code is fine to send; customer records are not."}}
+
+
+    # Keys are named for PROJECTS, not people.
+    apiKey:
+      mode: strict
+      keys:
+      # Two budgets on ONE key is the warn-then-enforce path. `Audit` records the
+      # overage and logs it, letting the request through; `Block` stops the next
+      # one. Be precise about what the warning is: the gateway emits a log event,
+      # and turning that into something a human sees is your log pipeline's job.
+      # Budgets are also charged AFTER the response returns, so a budget caps
+      # what a key can start rather than what it can spend.
+      - key: sk-demo-checkout-api-7f3a9c
+        metadata:
+          name: checkout-api
+        budgets:
+        - name: soft-nudge
+          limit:
+            unit: Tokens
+            amount: 200
+          window:
+            rolling: 24h
+          onBudgetExceeded: Audit
+        - name: hard-stop
+          limit:
+            unit: Tokens
+            amount: 400
+          window:
+            rolling: 24h
+          onBudgetExceeded: Block
+
+      # A dollar-denominated cap. A USD budget prices each request from the
+      # catalogue, so the cap holds however the model mix moves.
+      - key: sk-demo-mobile-app-2b8e41
+        metadata:
+          name: mobile-app
+        budgets:
+        - name: monthly-spend
+          limit:
+            unit: USD
+            amount: 250
+          window:
+            rolling: 30d
+          onBudgetExceeded: Block
+
+      # allowedModels enforces a model policy per project: this one may not
+      # reach the premium tier at all.
+      - key: sk-demo-analytics-9d4c02
+        metadata:
+          name: analytics
+        allowedModels:
+        - chat-standard
+        - chat-local
+
+      - key: sk-demo-platform-eng-5a1f77
+        metadata:
+          name: platform-eng
+
+  models:
+  # Concrete models point at the bundled mock upstreams so this repo runs with
+  # no cloud credentials. `provider: openAI` rather than `custom` is deliberate:
+  # cost attribution prices a request against the provider named in the
+  # catalogue, and `custom` is not in it, so a custom provider yields tokens
+  # with no dollars. Swap `provider` and `baseUrl` to go live.
+  - name: primary
+    visibility: internal
+    provider: openAI
+    params:
+      baseUrl: "http://upstream-primary:8080/v1"
+      model: gpt-4o-mini
+      apiKey: "unused-by-the-mock-upstream"
+    # Failover does nothing without eviction. See the virtual model below.
+    health:
+      eviction:
+        consecutiveFailures: 1
+        duration: 30s
+
+  - name: backup
+    visibility: internal
+    provider: openAI
+    params:
+      baseUrl: "http://upstream-backup:8080/v1"
+      model: gpt-4o-mini
+      apiKey: "unused-by-the-mock-upstream"
+    health:
+      eviction:
+        consecutiveFailures: 1
+        duration: 30s
+
+  - name: premium
+    visibility: internal
+    provider: openAI
+    params:
+      baseUrl: "http://upstream-primary:8080/v1"
+      model: gpt-4o
+      apiKey: "unused-by-the-mock-upstream"
+
+  - name: on-prem
+    visibility: internal
+    provider: openAI
+    params:
+      baseUrl: "http://upstream-local:8080/v1"
+      model: gpt-4o-mini
+      apiKey: "unused-by-the-mock-upstream"
+
+  # Names you control, not vendor SKUs. One line here moves every caller of
+  # chat-standard to a different model or a different vendor, with no change in
+  # any repo, IDE or application.
+  virtualModels:
+  - name: chat-standard
+    routing:
+      weighted:
+        targets:
+        - model: primary
+          weight: 100
+
+  - name: chat-premium
+    routing:
+      weighted:
+        targets:
+        - model: premium
+          weight: 100
+
+  # Traffic prefers priority 0 and moves to priority 1 only once EVERY target in
+  # group 0 has been evicted.
+  - name: chat-resilient
+    routing:
+      failover:
+        targets:
+        - model: primary
+          priority: 0
+        - model: backup
+          priority: 1
+
+  - name: chat-blend
+    routing:
+      weighted:
+        targets:
+        - model: primary
+          weight: 80
+        - model: premium
+          weight: 20
+
+  - name: chat-local
+    routing:
+      weighted:
+        targets:
+        - model: on-prem
+          weight: 100
+
+mcp:
+  port: 3000
+  toolMode: standard
+
+  policies:
+    # Prefer `allow` over `deny`: a deny rule that fails to evaluate fails OPEN.
+    # The schema says so, and in a regulated environment that is the whole
+    # argument. Anything not matched by an allow rule is refused, and refused
+    # tools are filtered out of tools/list so the client never sees them.
+    mcpAuthorization:
+      rules:
+      - allow: 'mcp.tool.name in ["lookup_record","search_orders","get_service_health","get_deploy_status"]'
+  codeModeSettings:
+    timeout: 1m0s
+    cpuTimeout: 1s
+  targets:
+  - name: records
+    mcp:
+      host: mcp-records
+      port: 9000
+      path: /mcp
+  - name: platform-ops
+    mcp:
+      host: mcp-platform-ops
+      port: 9000
+      path: /mcp
+
+
+# -----------------------------------------------------------------------------
+# Security token service.
+#
+# This section must be present in EVERY config the proxy loads: the bundle
+# launcher is told to run the STS and hard-fails the whole unit when a config
+# has no `entSts`. It is inert until Act 3 actually exchanges a token.
+#
+# All three validator lists are required even if you only use one flow. The STS
+# builds each at startup and refuses to start when any is empty.
+# -----------------------------------------------------------------------------
+entSts:
+  enabled: true
+  issuer: http://localhost:7777
+  tokenExpiration: 1h
+  requireAudience: false
+  privateKeyPath: /config/sts-jwt.pem
+  subjectValidators:
+  - validatorType: remote
+    issuer: http://keycloak:18083/realms/demo
+    remoteConfig:
+      url: http://keycloak:18083/realms/demo/protocol/openid-connect/certs
+  actorValidators:
+  - validatorType: remote
+    issuer: http://keycloak:18083/realms/demo
+    remoteConfig:
+      url: http://keycloak:18083/realms/demo/protocol/openid-connect/certs
+  apiValidators:
+  - validatorType: remote
+    issuer: http://keycloak:18083/realms/demo
+    remoteConfig:
+      url: http://keycloak:18083/realms/demo/protocol/openid-connect/certs
+
+
+# -----------------------------------------------------------------------------
+# The admin UI, behind your identity provider.
+#
+# The admin address has no authentication and should not be published from a
+# container task — and the cost dashboard lives on it. So serve the UI on a
+# gateway and attach an auth policy instead.
+#
+# Keycloak stands in for any OIDC provider. Swap `issuer` for yours and this
+# block is unchanged; the authorization rule then reads whatever claim your
+# provider puts groups in.
+# -----------------------------------------------------------------------------
+gateways:
+  ui-gateway:
+    port: 4001
+
+ui:
+  gateways: [ui-gateway]
+  policies:
+    oidc:
+      issuer: http://keycloak:18083/realms/demo
+      clientId: demo-ui
+      clientSecret: demo-ui-secret
+      redirectURI: http://localhost:14001/oauth/callback
+      scopes:
+      - profile
+      - email
+    authorization:
+      rules:
+      - allow: '"ai-admins" in jwt.groups'

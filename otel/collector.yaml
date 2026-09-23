@@ -1,0 +1,29 @@
+# OTLP destination for the demo.
+#
+# Stands in for whatever log aggregator or SIEM you run. Most accept OTLP as a
+# generic destination rather than through a named integration, so the migration
+# is usually: replace the `debug` exporter below with your vendor's exporter and
+# add it to the pipelines. Nothing in the gateway config changes.
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+
+processors:
+  batch: {}
+
+exporters:
+  debug:
+    verbosity: detailed
+
+service:
+  pipelines:
+    logs:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [debug]
+    traces:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [debug]
