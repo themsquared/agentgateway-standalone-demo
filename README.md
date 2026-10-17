@@ -1,5 +1,7 @@
 # agentgateway standalone demo
 
+> 📖 **Read the write-up:** [agentgateway Standalone: Guardrails, Budgets, Tool Governance](https://webofmike.com/agentgateway-standalone-demo/)
+
 A three-act walkthrough of **Solo Enterprise for agentgateway** running as the
 standalone binary — one configuration file, no Kubernetes, no cloud credentials
 required.
